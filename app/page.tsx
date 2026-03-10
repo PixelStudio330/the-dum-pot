@@ -1,12 +1,36 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ShoppingBag, Star, Plus, ChevronRight } from "lucide-react";
+import { 
+  ShoppingBag, 
+  Plus, 
+  ChevronRight, 
+  Star,
+  Minus,
+  Lock 
+} from "lucide-react";
 import Cart from "./components/Cart";
 
-// 1. DATA DEFINITION (Updated to Taka prices)
-const MENU_ITEMS = [
+// --- TYPES ---
+interface MenuItem {
+  id: number;
+  name: string;
+  desc: string;
+  price: number;
+  tag: string;
+  image: string;
+  calories: string;
+}
+
+interface CartItem extends MenuItem {
+  qty: number;
+  _id: string; 
+  foodId: string | number; 
+}
+
+// --- MOCK DATA ---
+const MENU_ITEMS: MenuItem[] = [
   {
     id: 1,
     name: "Classic Mutton Dum",
@@ -46,10 +70,34 @@ const MENU_ITEMS = [
 ];
 
 export default function Page() {
-  const [cartItems, setCartItems] = useState<any[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [hasOpenedOnce, setHasOpenedOnce] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  // --- STICKY HISTORY LOGIC ---
+  // Initialize state from localStorage if available
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [isOrdered, setIsOrdered] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const savedItems = localStorage.getItem("dum_pot_cart_items");
+    const savedOrder = localStorage.getItem("dum_pot_order");
+    
+    if (savedItems) setCartItems(JSON.parse(savedItems));
+    if (savedOrder) {
+        const orderData = JSON.parse(savedOrder);
+        setIsOrdered(orderData.isOrdered);
+    }
+  }, []);
+
+  // Sync Cart Items to LocalStorage
+  useEffect(() => {
+    if (mounted) {
+      localStorage.setItem("dum_pot_cart_items", JSON.stringify(cartItems));
+    }
+  }, [cartItems, mounted]);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 50);
@@ -57,13 +105,32 @@ export default function Page() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  const addToCart = (product: any) => {
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.body.style.overflow = isCartOpen ? "hidden" : "unset";
+    }
+  }, [isCartOpen]);
+
+  const totalPrice = useMemo(() => {
+    return cartItems.reduce((acc, item) => acc + item.price * item.qty, 0);
+  }, [cartItems]);
+
+  const addToCart = (product: MenuItem) => {
+    if (isOrdered) return; 
+
     setCartItems(prev => {
       const existing = prev.find(item => item.id === product.id);
       if (existing) {
-        return prev.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
+        return prev.map(item => 
+          item.id === product.id ? { ...item, qty: item.qty + 1 } : item
+        );
       }
-      return [...prev, { ...product, quantity: 1 }];
+      return [...prev, { 
+        ...product, 
+        qty: 1, 
+        _id: product.id.toString(),
+        foodId: product.id 
+      }];
     });
 
     if (!hasOpenedOnce) {
@@ -72,23 +139,48 @@ export default function Page() {
     }
   };
 
-  const updateQuantity = (id: number, delta: number) => {
-    setCartItems(prev => prev.map(item =>
-      item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item
-    ));
+  const updateQuantity = (id: string | number, delta: number) => {
+    if (isOrdered) return; 
+    setCartItems(prev => prev.map(item => {
+      if (item.id === id || item._id === id.toString()) {
+        const newQty = item.qty + delta;
+        return newQty > 0 ? { ...item, qty: newQty } : item;
+      }
+      return item;
+    }));
   };
 
-  const removeItem = (id: number) => {
-    setCartItems(prev => prev.filter(item => item.id !== id));
+  const removeItem = (id: string | number) => {
+    if (isOrdered) return; 
+    setCartItems(prev => prev.filter(item => (item.id !== id && item._id !== id.toString())));
   };
+
+  const clearCart = useCallback(() => {
+    setCartItems([]);
+    localStorage.removeItem("dum_pot_cart_items");
+  }, []);
+
+  if (!mounted) return null;
 
   return (
     <main className="relative min-h-screen bg-[#FDFBF0] text-[#3D3522] font-sans selection:bg-[#A35D2B] selection:text-white overflow-x-hidden">
 
-      {/* --- HERO SECTION --- */}
-      <section className="relative h-screen min-h-[900px] w-full flex items-center overflow-hidden isolate">
-        
-        {/* HERO BACKGROUND */}
+      <AnimatePresence>
+        {isCartOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => {
+                // FIX: Only close on click-outside if order isn't placed
+                if (!isOrdered) setIsCartOpen(false);
+            }}
+            className={`fixed inset-0 bg-black/40 backdrop-blur-sm z-[150] ${isOrdered ? 'cursor-default' : 'cursor-pointer'}`}
+          />
+        )}
+      </AnimatePresence>
+
+      <section className="relative h-screen min-h-[800px] w-full flex items-center overflow-hidden isolate">
         <div 
           className="absolute inset-0 grayscale-[0.1]" 
           style={{ 
@@ -100,18 +192,13 @@ export default function Page() {
           }}
         />
         
-        <div className="absolute inset-0 bg-gradient-to-r from-[#FDFBF0] via-[#FDFBF0]/40 to-transparent z-[-1]" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#FDFBF0] via-[#FDFBF0]/60 to-transparent z-[-1]" />
 
-        {/* --- SPIRAL END ELEMENT --- */}
-        <div 
-          className="absolute bottom-0 left-0 w-full overflow-hidden leading-[0] z-20"
-          style={{ transform: 'translateY(1px)' }}
-        >
+        <div className="absolute bottom-0 left-0 w-full overflow-hidden leading-[0] z-20 translate-y-[1px]">
           <svg 
             viewBox="0 0 1200 120" 
             preserveAspectRatio="none" 
-            className="relative block w-[calc(115%+1.3px)] h-[120px]"
-            style={{ fill: '#FDFBF0' }}
+            className="relative block w-[calc(115%+1.3px)] h-[120px] fill-[#FDFBF0]"
           >
             <path d="M321.39,56.44c58-10.79,114.16-30.13,172-41.86,82.39-16.72,168.19-17.73,250.45-.39C823.78,31,906.67,72,985.66,92.83c70.05,18.48,146.53,26.09,214.34,3V120H0V27.35A600.21,600.21,0,0,0,321.39,56.44Z" />
           </svg>
@@ -133,7 +220,7 @@ export default function Page() {
               <span className="text-[#8B9B6A] text-[10px] font-bold uppercase tracking-widest">Premium Culinary Experience • 2026</span>
             </motion.div>
             
-            <h1 className="text-4xl md:text-[8rem] font-serif font-black leading-[0.8] mb-10 tracking-tight">
+            <h1 className="text-5xl md:text-[8rem] font-serif font-black leading-[0.85] mb-10 tracking-tight">
               The <br /> 
               <span className="text-[#A35D2B] italic">Dum Pot.</span>
             </h1>
@@ -142,36 +229,26 @@ export default function Page() {
               We don't just cook; we preserve heritage. Every pot is sealed with dough and slow-cooked in its own juices.
             </p>
 
-            <div className="flex flex-wrap gap-6 items-center">
-              <button 
-                onClick={() => document.getElementById('menu')?.scrollIntoView({behavior: 'smooth'})}
-                className="px-12 py-5 bg-[#3D3522] text-[#FDFBF0] rounded-2xl font-bold flex items-center gap-4 hover:bg-[#A35D2B] transition-all shadow-2xl active:scale-95 group"
-              >
-                Explore Menu <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform" />
-              </button>
-            </div>
+            <button 
+              onClick={() => document.getElementById('menu')?.scrollIntoView({behavior: 'smooth'})}
+              className="px-12 py-5 bg-[#3D3522] text-[#FDFBF0] rounded-2xl font-bold flex items-center gap-4 hover:bg-[#A35D2B] transition-all shadow-2xl active:scale-95 group"
+            >
+              Explore Menu <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform" />
+            </button>
           </motion.div>
 
-          <div className="relative">
+          <div className="relative hidden lg:block">
             <motion.div 
               initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ 
-                opacity: 1, 
-                scale: 1,
-                y: [0, -30, 0] 
-              }}
+              animate={{ opacity: 1, scale: 1, y: [0, -20, 0] }}
               transition={{ 
                 opacity: { duration: 1.5 },
                 scale: { duration: 1.5, ease: [0.16, 1, 0.3, 1] },
-                y: {
-                  duration: 6,
-                  repeat: Infinity,
-                  ease: "easeInOut"
-                }
+                y: { duration: 6, repeat: Infinity, ease: "easeInOut" }
               }}
               className="relative z-20"
             >
-              <div className="relative w-full aspect-square max-w-[650px] mx-auto bg-white rounded-full p-6 shadow-[0_50px_100px_-20px_rgba(0,0,0,0.2)] border-[15px] border-[#FDFBF0]">
+              <div className="relative w-full aspect-square max-w-[600px] mx-auto bg-white rounded-full p-6 shadow-[0_50px_100px_-20px_rgba(0,0,0,0.2)] border-[15px] border-[#FDFBF0]">
                  <img 
                     src="/images/hero-biryani.png" 
                     className="w-full h-full object-cover rounded-full" 
@@ -197,25 +274,29 @@ export default function Page() {
         </div>
       </section>
 
-      {/* --- MENU SECTION --- */}
       <section id="menu" className="py-32 px-6 lg:px-20 relative bg-[#FDFBF0] z-50">
         <div className="container mx-auto">
-          <div className="flex flex-col md:flex-row justify-between items-end mb-24 gap-8">
-            <div className="max-w-2xl">
-              <h2 className="text-6xl md:text-6xl font-serif font-black italic tracking-tighter">The Selection.</h2>
+          <div className="mb-24 flex flex-col md:flex-row md:items-end justify-between gap-6">
+            <div>
+              <h2 className="text-6xl font-serif font-black italic tracking-tighter">The Selection.</h2>
               <p className="text-xl text-[#8B9B6A] font-semibold mt-4 mb-4">A minimalist menu focused on maximalist flavor profiles.</p>
             </div>
-            <div className="flex gap-4">
-              {['All', 'Meat', 'Vegan', 'Sides'].map((cat) => (
-                <button key={cat} className="px-6 py-2 rounded-full border border-[#3D3522]/10 text-[10px] font-bold uppercase tracking-widest hover:bg-[#3D3522] hover:text-white transition-all">{cat}</button>
-              ))}
-            </div>
+            {isOrdered && (
+              <motion.div 
+                initial={{ opacity: 0, x: 20 }} 
+                animate={{ opacity: 1, x: 0 }}
+                className="flex items-center gap-3 bg-[#A35D2B] text-white px-6 py-3 rounded-2xl shadow-lg"
+              >
+                <Lock size={18} />
+                <span className="font-bold uppercase text-xs tracking-widest">Order Locked</span>
+              </motion.div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-x-10 gap-y-32">
             {MENU_ITEMS.map((item, i) => {
               const cartItem = cartItems.find((ci) => ci.id === item.id);
-              const quantity = cartItem ? cartItem.quantity : 0;
+              const quantity = cartItem ? cartItem.qty : 0;
 
               return (
                 <motion.div
@@ -224,7 +305,8 @@ export default function Page() {
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.1, duration: 0.8 }}
-                  className="group relative bg-[#DCE3C9] rounded-[60px] p-10 pt-32 hover:bg-[#C2CCAA] transition-all duration-700 hover:-translate-y-4"
+                  className={`group relative rounded-[60px] p-10 pt-32 transition-all duration-700 bg-[#DCE3C9] 
+                    ${isOrdered ? 'opacity-70 grayscale-[0.4] cursor-not-allowed' : 'hover:bg-[#C2CCAA] hover:-translate-y-4 cursor-default'}`}
                 >
                   <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-48 h-48">
                     <div className="w-full h-full bg-white rounded-full border-8 border-[#FDFBF0] shadow-2xl overflow-hidden group-hover:scale-105 transition-transform duration-700">
@@ -240,11 +322,12 @@ export default function Page() {
                       <span className="text-[10px] text-[#8B9B6A] font-bold uppercase">{item.calories}</span>
                     </div>
                     <h3 className="text-2xl font-black mb-4 tracking-tight">{item.name}</h3>
-                    <p className="text-sm text-gray-700 leading-relaxed mb-8 opacity-80">{item.desc}</p>
+                    <p className="text-sm text-gray-700 leading-relaxed mb-8 opacity-80 min-h-[4.5rem] line-clamp-3">
+                      {item.desc}
+                    </p>
 
-                    {/* --- DYNAMIC INTERACTION ZONE --- */}
-                    <div className="flex items-center justify-between bg-[#FDFBF0]/60 p-2 rounded-[32px] min-h-[64px] border border-white/20 transition-all">
-                      <span className="text-2xl font-black text-[#3D3522] ml-4">৳{item.price.toLocaleString()}</span>
+                    <div className="flex items-center justify-between bg-[#FDFBF0]/60 p-2 rounded-[32px] min-h-[64px] border border-white/20">
+                      <span className="text-xl font-black text-[#3D3522] ml-4">৳{item.price.toLocaleString()}</span>
                       
                       <div className="flex items-center">
                         <AnimatePresence mode="wait">
@@ -255,9 +338,11 @@ export default function Page() {
                               animate={{ opacity: 1, scale: 1 }}
                               exit={{ opacity: 0, scale: 0.8 }}
                               onClick={() => addToCart(item)}
-                              className="bg-[#3D3522] text-white p-4 rounded-2xl hover:bg-[#A35D2B] transition-all shadow-xl active:scale-90"
+                              disabled={isOrdered}
+                              className={`p-4 rounded-2xl transition-all shadow-xl active:scale-90 flex items-center justify-center 
+                                ${isOrdered ? 'bg-gray-400 text-white/50' : 'bg-[#3D3522] text-white hover:bg-[#A35D2B]'}`}
                             >
-                              <Plus size={24} strokeWidth={3} />
+                              {isOrdered ? <Lock size={20} /> : <Plus size={24} strokeWidth={3} />}
                             </motion.button>
                           ) : (
                             <motion.div
@@ -265,20 +350,20 @@ export default function Page() {
                               initial={{ opacity: 0, x: 20 }}
                               animate={{ opacity: 1, x: 0 }}
                               exit={{ opacity: 0, x: 20 }}
-                              className="flex items-center gap-3 bg-[#3D3522] rounded-2xl p-1 shadow-xl"
+                              className={`flex items-center gap-3 rounded-2xl p-1 shadow-xl ${isOrdered ? 'bg-gray-400' : 'bg-[#3D3522]'}`}
                             >
                               <button
                                 onClick={() => quantity === 1 ? removeItem(item.id) : updateQuantity(item.id, -1)}
-                                className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-xl transition-colors"
+                                disabled={isOrdered}
+                                className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-xl transition-colors disabled:opacity-50"
                               >
-                                <span className="text-2xl font-bold leading-none">-</span>
+                                <Minus size={18} strokeWidth={3} />
                               </button>
-                              
                               <span className="text-white font-black text-lg min-w-[20px]">{quantity}</span>
-                              
                               <button
                                 onClick={() => updateQuantity(item.id, 1)}
-                                className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-xl transition-colors"
+                                disabled={isOrdered}
+                                className="w-10 h-10 flex items-center justify-center text-white hover:bg-white/10 rounded-xl transition-colors disabled:opacity-50"
                               >
                                 <Plus size={18} strokeWidth={4} />
                               </button>
@@ -295,7 +380,6 @@ export default function Page() {
         </div>
       </section>
 
-      {/* --- FLOATING CART WIDGETS --- */}
       <div className="fixed bottom-10 right-10 z-[200] flex flex-col items-end gap-6">
         <AnimatePresence>
           {cartItems.length > 0 && !isCartOpen && (
@@ -308,8 +392,8 @@ export default function Page() {
             >
               <div className="flex justify-between items-center mb-4">
                 <p className="text-[10px] font-black text-[#A35D2B] uppercase tracking-widest flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#A35D2B] animate-ping" />
-                  Active Order (click to open cart)
+                  <span className={`w-1.5 h-1.5 rounded-full ${isOrdered ? 'bg-red-500' : 'bg-[#A35D2B] animate-ping'}`} />
+                  {isOrdered ? 'Order Finalized' : 'Active Order'}
                 </p>
                 <ChevronRight size={14} className="text-gray-300 group-hover:translate-x-1 transition-transform" />
               </div>
@@ -317,8 +401,8 @@ export default function Page() {
               <div className="space-y-3 max-h-[150px] overflow-y-auto pr-2 custom-scrollbar">
                 {cartItems.map((item) => (
                   <div key={item.id} className="flex justify-between items-center text-sm">
-                    <span className="font-bold text-[#3D3522]">{item.quantity}x {item.name}</span>
-                    <span className="font-black text-[#A35D2B]">৳{(item.price * item.quantity).toLocaleString()}</span>
+                    <span className="font-bold text-[#3D3522]">{item.qty}x {item.name}</span>
+                    <span className="font-black text-[#A35D2B]">৳{(item.price * item.qty).toLocaleString()}</span>
                   </div>
                 ))}
               </div>
@@ -328,12 +412,12 @@ export default function Page() {
 
         <button 
           onClick={() => setIsCartOpen(true)}
-          className="bg-[#A35D2B] text-white p-6 rounded-[28px] shadow-2xl hover:scale-110 transition-transform relative group active:scale-95"
+          className={`p-6 rounded-[28px] shadow-2xl hover:scale-110 transition-transform relative group active:scale-95 ${isOrdered ? 'bg-gray-700' : 'bg-[#A35D2B]'} text-white`}
         >
-          <ShoppingBag size={30} strokeWidth={2.5} />
+          {isOrdered ? <Lock size={30} /> : <ShoppingBag size={30} strokeWidth={2.5} />}
           {cartItems.length > 0 && (
             <span className="absolute -top-2 -right-2 bg-[#3D3522] text-white text-[12px] w-8 h-8 flex items-center justify-center rounded-full border-4 border-[#FDFBF0] font-black group-hover:bg-black transition-colors">
-              {cartItems.reduce((a, b) => a + b.quantity, 0)}
+              {cartItems.reduce((a, b) => a + b.qty, 0)}
             </span>
           )}
         </button>
@@ -345,6 +429,10 @@ export default function Page() {
         items={cartItems}
         onUpdateQuantity={updateQuantity}
         onRemove={removeItem}
+        onClearCart={clearCart}
+        total={totalPrice} 
+        isOrdered={isOrdered}
+        setIsOrdered={setIsOrdered}
       />
     </main>
   );
